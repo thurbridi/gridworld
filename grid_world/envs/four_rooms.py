@@ -2,7 +2,6 @@ import gym
 from gym import spaces
 import numpy as np
 from enum import IntEnum
-from gym.utils.renderer import Renderer
 
 
 class FourRoomsEnv(gym.Env):
@@ -22,6 +21,8 @@ class FourRoomsEnv(gym.Env):
 
         self.agent_pos = None
         self.target_pos = None
+
+        self._is_reset = False
 
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(3, *self.layout.shape), dtype=np.uint8
@@ -45,38 +46,35 @@ class FourRoomsEnv(gym.Env):
             self.window = pygame.display.set_mode((self.window_size, self.window_size))
             self.clock = pygame.time.Clock()
 
-        self.renderer = Renderer(self.render_mode, self._render_frame)
-
     def step(self, action):
+        assert self._is_reset, "Cannot call env.step() before calling reset()"
         self.agent_pos = self._move(action)
 
         obs = self._get_obs()
 
         reward = 1 if self._is_agent_on_target() else 0
 
-        terminated = self._is_agent_on_target()
-
-        truncated = False
+        done = self._is_agent_on_target()
 
         info = self._get_info()
 
-        self.renderer.render_step()
+        if self.render_mode == "human":
+            self._render_frame()
 
-        return obs, reward, terminated, truncated, info
+        return obs, reward, done, info
 
-    def reset(self, seed=None, return_info=False, options=None):
-        super().reset(seed=seed)
-
+    def reset(self):
+        self._is_reset = True
         self.target_pos = self._sample_target_pos()
         self.agent_pos = self._sample_agent_pos()
 
         obs = self._get_obs()
-        info = self._get_info()
 
-        return (obs, info) if return_info else obs
+        return obs
 
     def render(self):
-        return self.renderer.get_renders()
+        if self.render_mode == "rgb_array":
+            return self._render_frame()
 
     def close(self):
         if self.window is not None:
@@ -85,12 +83,7 @@ class FourRoomsEnv(gym.Env):
             pygame.display.quit()
             pygame.quit()
 
-    def _render_frame(self, mode):
-        # This will be the function called by the Renderer to collect a single frame.
-        assert (
-            mode is not None
-        )  # The renderer will not call this function with no-rendering.
-
+    def _render_frame(self):
         import pygame  # avoid global pygame dependency. This method is not called with no-render.
 
         canvas = pygame.Surface((self.window_size, self.window_size))
@@ -144,7 +137,7 @@ class FourRoomsEnv(gym.Env):
                 width=3,
             )
 
-        if mode == "human":
+        if self.render_mode == "human":
             assert self.window is not None
             # The following line copies our drawings from `canvas` to the visible window
             self.window.blit(canvas, canvas.get_rect())
@@ -161,25 +154,23 @@ class FourRoomsEnv(gym.Env):
 
     def _sample_target_pos(self):
         target_regions = self.target_regions["train"]
-        sampling_region = target_regions[
-            self.np_random.integers(target_regions.shape[0])
-        ]
+        sampling_region = target_regions[np.random.randint(target_regions.shape[0])]
         target_pos = np.array(
             [
-                self.np_random.integers(sampling_region[0, 0], sampling_region[1, 0]),
-                self.np_random.integers(sampling_region[0, 1], sampling_region[1, 1]),
+                np.random.randint(sampling_region[0, 0], sampling_region[1, 0]),
+                np.random.randint(sampling_region[0, 1], sampling_region[1, 1]),
             ]
         )
 
         return target_pos
 
     def _sample_agent_pos(self):
-        agent_pos = self.np_random.integers(1, self.layout.shape[1] - 1, size=2)
+        agent_pos = np.random.randint(1, self.layout.shape[1] - 1, size=2)
         while (
             np.array_equal(agent_pos, self.target_pos)
             or self.layout[agent_pos[0], agent_pos[1]] == 1
         ):
-            agent_pos = self.np_random.integers(1, self.layout.shape[1] - 1, size=2)
+            agent_pos = np.random.randint(1, self.layout.shape[1] - 1, size=2)
 
         return agent_pos
 
@@ -263,8 +254,8 @@ if __name__ == "__main__":
     while True:
         env.render()
         action = env.action_space.sample()
-        obs, reward, terminated, _, _ = env.step(action)
-        if terminated:
+        obs, reward, done, info = env.step(action)
+        if done:
             break
 
     env.close()
